@@ -1,0 +1,132 @@
+name: Java CI Automatically # The name of your workflow
+on: # The name of the GitHub event that triggers the workflow
+  # When using the push or pull_request events, you can configure a workflow to run on specific branches or tags
+  push:
+    branches:
+      - master
+  pull_request:
+    # Only use the 'types' keyword to narrow down the activity types that will trigger your workflow
+    types:
+      - closed  # This workflow will only be triggered when the pull request is closed
+    branches: # Target branches
+      - release/* # Accept glob patterns that use characters like *, **, +, ?, ! and others to match more than one branch or tag name
+
+  workflow_dispatch:
+    inputs:
+      deploy_env:
+        description: 'The environment you gonna deploy your service in'
+        required: true
+        default: 'dev'
+
+jobs:
+  build-and-push-image:
+    # Name of the job which will be shown on the web console
+    name: Build and Push Docker Image
+    # Use a list of labels to determine which runner the workflow will run on
+    runs-on:
+      - self-hosted
+      - ubuntu-lts
+      - ali
+
+    # Global environment variables
+    env:
+      RT_CDH_REGISTRY: "register"
+      PRODUCT_NAME: "e2e-core"   # put your production name here
+      service_name: e2e-core
+      DEPLOYMENT_REPO: repourl
+      DEPLOYMENT_FILE_PATH: argo/dev/test-engine/deployment.yaml
+      DEPLOYMENT_IMAGE_TAG: spec.template.spec.containers[0].image
+
+
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE on runner, so your workflow can access it
+      - uses: actions/checkout@v2
+
+      # Login object's artifactory
+      - name: Login to Artifactory
+        uses: docker/login-action@v1
+        with:
+          registry: artifactorydomain
+          username: ${{ secrets.RT_CDH_USERNAME }}
+          password: ${{ secrets.RT_CDH_TOKEN }}
+
+      - name: Download Docker Buildx
+        run: |
+          mkdir -p $HOME/.docker/cli-plugins \
+          && curl https://domain/docker-buildx/buildx-v0.5.1.linux-amd64 -o $HOME/.docker/cli-plugins/docker-buildx \
+          && chmod +x $HOME/.docker/cli-plugins/docker-buildx
+
+      # Setup Docker context for Buildx
+      - name: Set up Docker Context
+        run: |
+          docker context rm builder | true
+          docker context create builder
+        continue-on-error: true
+
+      # This action will create and boot a builder that can be used in the following steps of the workflow
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v1
+        with:
+          endpoint: builder
+
+      # Get the environment variable ready
+      - name: Set env
+        run: |
+          _branch_name="${GITHUB_REF#refs/heads/}"
+          _branch_name="${_branch_name//\//-}"
+          
+          # Generate the image tag, e.g:[branch-name(escape the slash)]-[build-time(second level)]-[short-commit-id]
+          TagName=$_branch_name-$(TZ=UTC-8 date '+%Y%m%d%H%M%S')-${GITHUB_SHA::8}
+          
+          SERVICE_IMAGE_NAME=${GITHUB_REPOSITORY#*/}
+          
+          # Get the namespce of artifactory based on the branch name
+          if [[ "$_branch_name" =~ "^release" ]]; then
+              RT_CDH_NAMESPACE="cn-digital-hub-docker-release-local"
+          else
+              RT_CDH_NAMESPACE="cn-digital-hub-docker-dev-local"
+          fi
+          
+          echo IMAGE_FULL_NAME="${{ env.RT_CDH_REGISTRY }}/${RT_CDH_NAMESPACE}/${{ env.PRODUCT_NAME }}/${SERVICE_IMAGE_NAME}:${TagName}" >> $GITHUB_ENV
+
+      # To build and push Docker image with Buildx with full support of the features provided by Moby BuildKit builder toolkit
+      - name: Build and push
+        # id: A unique identifier for the step. You can use the id to reference the step in contexts
+        id: docker_build
+        uses: docker/build-push-action@v2
+        with:
+          # push: Push the build result to registry, default: false
+          push: true
+          tags: "${{ env.IMAGE_FULL_NAME }}"
+          # Do not use cache when building the image
+          no-cache: true
+          # secrets: Set the variables which will be delivered to Dockerfile to build Java
+          secrets: |
+            "gradle.properties=${{ secrets.CDH_GRADLE_PROPERTIES }}"
+          build-args: |
+            service_name=${{ env.service_name }}
+
+      # Print the image digest at the end of the workflow
+      - name: Image name
+        run: echo ${{ env.IMAGE_FULL_NAME }}
+
+#       - name: Update deployment file
+#         run: |
+#           echo "Todo: automatic update helm/deployment file image"
+#           #echo "MAS_SA_TOKEN: " ${{ secrets.MAS_SA_TOKEN }}
+#           echo "yaml path: " ${DEPLOYMENT_FILE_PATH}
+#           docker run -t --rm artifactorypath/path/docker-images/argobot:1.0 \
+#           --token ${{ secrets.SA_ISIP_A_TOKEN }} \
+#           --repo ${DEPLOYMENT_REPO} \
+#           --filePaths ${DEPLOYMENT_FILE_PATH} \
+#           --tag ${IMAGE_FULL_NAME} \
+#           --element ${DEPLOYMENT_IMAGE_TAG}
+
+
+      - name: basic information Annotations
+        run: |
+          echo "::warning ::service_name: ${service_name} , \
+            new image tag: ${IMAGE_FULL_NAME} , \
+            GITHUB_RUN_ID: $GITHUB_RUN_ID , \
+            GITHUB_RUN_NUMBER: $GITHUB_RUN_NUMBER"
+#            IMAGE_FULL_TAG: $IMAGE_FULL_TAG"

@@ -1,0 +1,17 @@
+spring:
+  application:
+    group: org.charlotte.personal
+    name: test-engine
+  profiles:
+    active: ${profile:dev}
+#    active: ${profile:local}
+  cloud:
+    nacos:
+      config:
+        file-extension: yml
+        name: ${spring.application.group}:${spring.application.name}.yml
+        refresh-enabled: true
+
+#  jackson:
+#    serialization:
+#      FAIL_ON_EMPTY_BEANS: false

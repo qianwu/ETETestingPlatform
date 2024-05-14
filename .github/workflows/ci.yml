@@ -1,0 +1,87 @@
+name: CI
+
+on:
+#  push:
+#    branches: [ master ]
+#  pull_request:
+#    branches: [ master ]
+  workflow_dispatch:
+#    inputs:
+#      service_name:
+#        description: 'The service to be build(server、bff)'
+#        required: true
+#        default: 'server'
+
+jobs:
+  main:
+
+    runs-on:
+      - self-hosted
+      - ali
+
+#      - ubuntu-lts
+
+    env:
+      service_name: e2e-core
+      artifactory_domain: artifacotrydomain
+      artifactory_location_dev: location
+      DOCKER_FILE_PATH: Dockerfile
+      DEPLOYMENT_REPO: repourl
+      DEPLOYMENT_FILE_PATH: argo/dev/test-engine/deployment.yaml
+      DEPLOYMENT_IMAGE_TAG: spec.template.spec.containers[0].image
+
+
+    steps:
+
+      - name: set up shell env
+        run: |
+          # echo "service_name=${{ github.event.inputs.service_name }}" >> $GITHUB_ENV
+          echo "GITHUB_SHA_SHORT=$(echo ${{ github.sha }} | head -c7)" >> $GITHUB_ENV
+          echo "CURRENT_TIME=$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
+          source $GITHUB_ENV
+          echo "IMAGE_TAG=1.0.${GITHUB_RUN_NUMBER}-${GITHUB_SHA_SHORT}-${CURRENT_TIME}" >> $GITHUB_ENV
+          source $GITHUB_ENV
+          echo "IMAGE_FULL_TAG=${artifactory_domain}/${artifactory_location_dev}/${service_name}:$IMAGE_TAG" >> $GITHUB_ENV
+          echo "IMAGE_FULL_TAG_LATEST=${artifactory_domain}/${artifactory_location_dev}/${service_name}:latest" >> $GITHUB_ENV
+          echo "IMAGE_FULL_TAG_WITHOUT_VERSION=${artifactory_domain}/${artifactory_location_dev}/${service_name}" >> $GITHUB_ENV
+          source $GITHUB_ENV
+
+      - name: Clone source code
+        uses: china-digital-hub/checkout@v2
+#        uses: actions/checkout@v2
+
+      - name: login to REPOSITORY_ARTIFACTORY_CN
+        uses: docker/login-action@v1
+        with:
+          registry: ${{ env.artifactory_domain }}
+          username: ${{ secrets.RT_CDH_USERNAME }}
+          password: ${{ secrets.RT_CDH_TOKEN }}
+
+      - name: Image build and push
+        run: |
+          docker build -t ${IMAGE_FULL_TAG} --file ${DOCKER_FILE_PATH} \
+            --build-arg service_name=${service_name} .
+
+          docker tag ${IMAGE_FULL_TAG} ${IMAGE_FULL_TAG_LATEST}
+          #docker push ${IMAGE_FULL_TAG_LATEST}
+          docker push ${IMAGE_FULL_TAG}
+
+      - name: Update deployment file
+        run: |
+          echo "Todo: automatic update helm/deployment file image"
+          #echo "MAS_SA_TOKEN: " ${{ secrets.MAS_SA_TOKEN }}
+          echo "yaml path: " ${DEPLOYMENT_FILE_PATH}
+          docker run -t --rm url/docker-images/argobot:1.0 \
+          --token ${{ secrets.SA_ISIP_A_TOKEN }} \
+          --repo ${DEPLOYMENT_REPO} \
+          --filePaths ${DEPLOYMENT_FILE_PATH} \
+          --tag ${IMAGE_FULL_TAG} \
+          --element ${DEPLOYMENT_IMAGE_TAG}
+
+      - name: basic information Annotations
+        run: |
+          echo "::warning ::service_name: ${service_name} , \
+            new image tag: ${IMAGE_TAG} , \
+            GITHUB_RUN_ID: $GITHUB_RUN_ID , \
+            GITHUB_RUN_NUMBER: $GITHUB_RUN_NUMBER , \
+            IMAGE_FULL_TAG: $IMAGE_FULL_TAG"

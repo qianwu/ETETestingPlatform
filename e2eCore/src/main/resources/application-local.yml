@@ -1,0 +1,32 @@
+spring:
+  data:
+    mongodb:
+      host: 127.0.0.1
+      port: 27017
+      database: test_engine
+  jackson:
+    serialization:
+      WRITE_DATES_AS_TIMESTAMPS: false
+  security:
+    oauth2:
+      resourceserver:
+        jwt:
+          issuer-uri: url
+
+github:
+  #  token: "token 33f1097668eacf11f66affc59abea431647c9202"
+  token: "token 51a432f35c612fceecfd2bcd95ae170010fc1f11"
+  accept:
+    default: "application/vnd.github.v3+json"
+logging:
+  level:
+    org.apache.http: debug
+    httpclient.wire: debug
+
+
+task:
+  cron:
+    overtimeChainDataCallbackJob: "0 0/1 * * * ?"
+    autoExecuteAllChainJob: "0 18 8 1/1 * ?"
+    maximum_number_of_records_retained: 8
+
